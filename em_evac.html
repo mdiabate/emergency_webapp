@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+
+		<!-- Always force latest IE rendering engine (even in intranet) & Chrome Frame
+		Remove this if you use the .htaccess -->
+		<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+
+		<title>Emergency Management </title>
+		<meta name="description" content="" />
+		<meta name="author" content="Mouhamad and Ron" />
+
+		<meta name="viewport" content="width=device-width; initial-scale=1.0" />
+
+		<!-- Replace favicon.ico & apple-touch-icon.png in the root of your domain and delete these references -->
+		<link rel="shortcut icon" href="/favicon.ico" />
+		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+		<link rel="stylesheet" href="http://code.jquery.com/mobile/1.1.1/jquery.mobile-1.1.1.min.css"/>
+		<script src="http://code.jquery.com/jquery-1.7.1.min.js"></script> 
+		<script>
+			$(document).bind("mobileinit", function(evt){
+				
+				$.mobile.defaultPageTransition = "pop"
+				$.mobile.page.prototype.options.headerTheme="e";
+				$.mobile.page.prototype.options.footerTheme="e";
+				$.mobile.pageLoadErrorMessage="Whoops!! Page Load Error";
+			});
+		</script>
+		<script src="http://code.jquery.com/mobile/1.1.1/jquery.mobile-1.1.1.min.js"></script>
+		<script src="http://serverapi.arcgisonline.com/jsapi/arcgis/?v=3.1compact"></script>
+		<link rel="stylesheet" href="styles.css"/>
+		
+	<script>
+		dojo.require("esri.map");
+		dojo.require("esri.tasks.locator");
+		dojo.require("esri.tasks.route");
+		
+		var locator;
+		var searchLocation, currentLocation;
+		var results;
+		var map;
+		var resultLocationsLayer, routeGraphicLayer, segmentGraphicsLayer;
+		var baseMapLayer;
+		var routeTask, params, directionFeatures;
+		
+		
+		function init(){
+			
+			
+			if(navigator.geolocation) {
+				navigator.geolocation.watchPosition(showLocation, locationError);
+			
+			} else{
+				alert("Geolocation not supported on this device");
+				return;
+			}			
+		
+			$("#shItem").live ("click", function() {
+				queryYahoo('recreation center or community center');
+			 });
+		     $("#policeItem").live ("click", function() {
+				queryYahoo('police');
+			 });
+			 $("#fsItem").live ("click", function() {
+				queryYahoo("Fire Station");
+			 });
+			 $("#tdItem").live ("click", function(){
+				queryYahoo('Transportation Department');
+			 });
+			 $("#hospitalItem").live ("click", function(){
+				queryYahoo('Hospital');
+			 });
+					
+	 	}
+			
+		function showLocation(location) {
+	 			
+	 			var pt = new esri.geometry.Point(location.coords.longitude, location.coords.latitude, new esri.SpatialReference({
+			          wkid : 4326
+			    }));
+			        
+			    currentLocation = pt;
+			  
+		 	   var coord = "Latitude = "+ pt.y + "    Longitude = " + pt.x;
+		 	  //alert("Current Location:   "+ coord);
+		 	   if(!locator){	
+		        	
+		        	
+		        locator = new esri.tasks.Locator("http://sampleserver1.arcgisonline.com/ArcGIS/rest/services/Locators/ESRI_Geocode_USA/GeocodeServer");	
+				}
+				
+			     
+			     locator.locationToAddress(pt, 120, function(candidate) {
+			        	if(candidate.address){
+		    			var address ="Address: "+candidate.address.Address + "<br/>" + candidate.address.City + "," + candidate.address.State + " " + candidate.address.Zip;
+		    			$('#loc').html(address);
+		    			
+		    			var info = "<br/> Location accurate within " + location.coords.accuracy + " Meters <br/> Last Updated:" + new Date(location.timestamp).toLocaleString();
+		    			$('#acc').html(coord+info);
+		    			
+		    			if(!map)initMap(pt.x,pt.y);
+		    		}
+						//alert(candidate.address.City); 
+							
+			        }, function(error) {
+			        	
+			        	$('#loc').html('Unable to determine address');   //alert("error");
+			        });  
+	 	}
+	 	function locationError(error){
+		    	switch (error.code){
+		    		case error.PERMISSION_DENIED:
+		    		  alert("Geolocation access denied or disabled. Te enable geolocation on your iphone, go to setting >General> Location Services");
+		    		  break;
+		    		case error.POSITION_UNAVAILABLE:
+		    		  alert("Current Location not available");
+		    		  break;
+		    		case error.TIMEOUT:
+		    		  alert("Timeout");
+		    		  break;
+		    		default:
+		    		  alert("unknown error")
+		    		  break;
+		      }
+		}
+		
+		function queryYahoo(queryVal) {
+	      
+	      		var dist = $("#distVal").text().split(" ");
+	            //alert("Your search distance is " + dist[0]+ " miles");  	
+	        	searchLocation = currentLocation;
+		      
+		        var queryParams = {
+		        	query : queryVal,
+		          	latitude : searchLocation.y,
+		          	longitude : searchLocation.x,
+			        radius : dist[0],
+			        results : 10,
+			        output : "json",
+			        appid :"n9kD60zV34HiiQHkjF07ulQn6fm7HG3j9upaYxj7Xt_fzdMqwbN4_qJkBIOmMdRywsxjFDqpHCMXjOw-" 
+		        };
+	
+		        esri.request({
+					url : "http://local.yahooapis.com/LocalSearchService/V3/localSearch",
+					content : queryParams,
+					handleAs : "json",
+					callbackParamName : "callback",
+					load : buildYahooLocalLocations,
+					error : esri.config.defaults.io.errorHandler
+		        });
+	                
+		    } 
+
+     
+         
+	        function buildYahooLocalLocations(response) {
+	        	$("#searchResults li").remove();
+	        	
+	        	if(response.ResultSet.totalResultsReturned == 0) {
+	        		
+	        		var noResults = $("<li>").html("No results found within search radius. Use the settings option to increase the search distance.");
+	        		
+	        		$("#searchResults").append(noResults);
+	        		return;
+	        	}
+	        		
+        		results = [];
+        		
+        		if(response.ResultSet.totalResultsReturned == 1) {
+        			results.push(response.ResultSet.Result);
+        		} else {
+        			results = response.ResultSet.Result;
+        		}
+				
+				for(var i=0; i<results.length; i++){
+					
+				var content;    
+					
+					if(results[i].BusinessClickUrl) {
+						content = "<a target='_blank' href='tel: " + results[i].Phone+ "'> <b>" + results[i].Title + "</b></a>";
+					}else{
+						content = "<a target='_blank' href='" + results[i].BusinessClickUrl + "'> <b>" + results[i].Title + "</b></a>";
+					}
+					content = content + results[i].Address + "</br>";
+					content = content + results[i].Phone + "<br />";
+					  
+					content = content + results[i].Distance + " miles<br/> </a>";  
+					content = content + "<a href='#mapView' onclick='locationDetails(" + i + ")' > Route </a>";                                 
+					var resultItem = $("<li>").html(content);
+					$("#searchResults").append(resultItem);
+				} 
+				
+				$("#searchResults").listview("refresh"); 	
+	        }
+            
+            function locationDetails(index){
+	      	 
+				var info = {};
+				info.lat = results[index].Latitude;
+				info.lon = results[index].Longitude;
+				info.title = results[index].Title;
+			
+				mapResults(info);
+				
+				}
+			function mapResults(info){
+				resultLocationsLayer.clear();
+				routeGraphicLayer.clear();
+				segmentGraphicsLayer.clear();
+				
+				params.directionsLengthUnits = esri.Units.MILES;
+				params.outSpatialReference = map.spatialReference;
+				
+				var fromSymbol = new esri.symbol.SimpleMarkerSymbol().setColor(new dojo.Color([105, 153, 0]));
+				var cpName = $("#loc").html();
+				var attr = {"Name": cpName, "Route Name": info.title};
+				var infoTemplate = new esri.InfoTemplate("Origin", "Address: ${Name} <br/>");
+				
+				var startLoc = new esri.Graphic(esri.geometry.geographicToWebMercator(new esri.geometry.Point(searchLocation, new esri.SpatialReference({
+					wkid : 4326
+				}))), fromSymbol, attr, infoTemplate);
+				
+					resultLocationsLayer.add(startLoc);
+					params.stops.features[0]= startLoc;
+					
+			   var toSymbol = new esri.symbol.SimpleMarkerSymbol().setColor(new dojo.Color([204, 0, 0]));
+			   attr = {"Name": info.title, "Route Name": info.title};
+			   infoTemplate = new esri.InfoTemplate("Destination", "Address: ${Name} <br/>");
+			   
+			   var endLoc = new esri.Graphic(esri.geometry.geographicToWebMercator(new esri.geometry.Point(info.lon, info.lat, new esri.SpatialReference({
+			   	wkid: 4326
+			   	}))), toSymbol, attr, infoTemplate);
+			   	
+			    resultLocationsLayer.add(endLoc);
+			    params.stops.features[1] = endLoc;
+			    
+			    routeTask.solve(params, function(solveResult){
+			    
+			       var directions = solveResult.routeResults[0].directions;
+			       
+			       routeGraphicLayer.add(new esri.Graphic(directions.mergedGeometry));
+			       map.setExtent(directions.extent, true);	
+			       
+			       directionFeatures = directions.features;
+			       
+			       var content = ("<ol>");
+			       
+			       for(var index=0; index < directionFeatures.length; index++){
+			       	
+			       	feature = directionFeatures[index];
+			       	
+			       	if(index === 0 || index === directions.features.length - 1) {
+			       		content += "<li>" + feature.attributes.text +"</li>";
+			       	} else {
+			       		content += "<li onclick='zoomToSegment(" + index + ")'> <a href='#mapView'>" + feature.attributes.text + "</a></li>";
+			       		
+			       	}
+			       }
+			       
+			       content +=("</ol>");
+			       $("#directions").html(content);
+			       
+			    }, function(error){
+			    $("#directions").html("<b>Error:</b>");
+			    });
+			    
+			    var bodyWidth = $("body").css("width");
+			    var bodyHeight = $("body").css("height");
+			    
+			    $("#mapDiv").css("height", bodyHeight);
+			    $("#mapDiv").css("width", bodyWidth);
+			    
+			    map.resize();
+			    			
+			}
+			
+			function zoomToSegment(index){
+	 		
+	 		var segment = directionFeatures[index];
+	 		segmentGraphicsLayer.clear();
+	 		
+	 		var segmentGraphic = new esri.Graphic(segment.geometry);
+	 		
+	 		segmentGraphicsLayer.add(segmentGraphic);
+	 		
+	 		map.setExtent(segment.geometry.getExtent(), true);
+	 	}
+	 	
+	 	
+			    
+		function updateDist(value){
+			alert("Search distance changed to " + value + " miles");
+				
+			$("#distVal").html( value + " miles");
+		}
+		
+		function initMap(x, y){
+			var xmin = x - 0.05;
+			var ymin = y - 0.05;
+			var xmax = x + 0.05;
+			var ymax = y + 0.05;
+			
+			var extent = new esri.geometry.Extent(xmin, ymin, xmax, ymax, new esri.SpatialReference({wkid:4326}));
+			var wmExtent = esri.geometry.geographicToWebMercator(extent);
+			
+			map= new esri.Map("mapDiv");
+			map.setExtent(wmExtent, true);
+			
+			var baseMapLayer = new esri.layers.ArcGISTiledMapServiceLayer("http://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer");
+			map.addLayer(baseMapLayer);
+			
+			resultLocationsLayer = new esri.layers.GraphicsLayer();
+			map.addLayer(resultLocationsLayer);
+			
+			var routePolylineSymbol = new esri.symbol.SimpleLineSymbol(esri.symbol.SimpleLineSymbol.STYLE_SOLID, new dojo.Color([115, 44, 123, 0.6]), 4.5);
+			var routeRenderer = new esri.renderer.SimpleRenderer(routePolylineSymbol);
+			
+			routeGraphicLayer = new esri.layers.GraphicsLayer();
+			routeGraphicLayer.setRenderer(routeRenderer);
+			
+			map.addLayer(routeGraphicLayer);
+			
+			var segmentSymbol = new esri.symbol.SimpleLineSymbol(esri.symbol.SimpleLineSymbol.STYLE_SOLID, new dojo.Color([102, 255, 255, 0.5]), 10);
+			var segmentRenderer = new esri.renderer.SimpleRenderer(segmentSymbol);
+			
+			segmentGraphicsLayer = new esri.layers.GraphicsLayer();
+			segmentGraphicsLayer.setRenderer(segmentRenderer);
+			
+			map.addLayer(segmentGraphicsLayer);
+			
+			routeTask = new esri.tasks.RouteTask("http://servicesbeta.esri.com/arcgis/rest/services/Network/USA/NAServer/Route");
+			
+			params = new esri.tasks.RouteParameters();
+			params.stops = new esri.tasks.FeatureSet();
+			params.returnRoutes = true;
+			params.returnDirections = true;
+		}
+		
+		$(document).ready(init);
+		
+	  </script>
+   </head>
+
+	<body>
+		<div id="homeView" data-role="page" data-title="Emergency Evacuation" data-theme="a">
+			<div id="header1" data-position="fixed" data-role="header" data-theme="e">
+				
+				<h1>Emergency Management</h1>
+				
+			</div>
+			
+			<div data-role="content" align="center">
+				<img src="images/safety.png" alt="View Source Logo" width="250px"/>
+				
+		   <div data-role="controlgroup">
+			    	<a href="#findView" data-role = "button" data-icon="search" data-theme="d">Evacuation</a>
+			        <a href="#info" data-role="button" data-icon="info" data-theme="d">Emergency Info</a>
+
+		      </div>
+
+	         </div>
+	    
+	     </div>
+	 
+	 <div id="findView" data-role="page" data-theme="a">
+	 	<div  id="header1" data-position="fixed" data-role="header"  data-theme="e">
+			<a href="#homeView" data-icon="home" data-iconpos="notext">Home</a>
+				<h1>Evacuation Centers</h1>
+		 </div>
+		  
+		 <div data-role="content" >
+		 	
+		 	<h2>Current Location</h2>
+		  	<div id="loc"> </div>
+		  	<div id="acc"> </div>
+		 	
+		  	<ul data-role="listview" data-inset="true" data-theme="d">
+		  		<li id="shItem"><a href="#resultsView">Shelters</a></li>
+		  		<li id="hospitalItem"><a href="#resultsView" >Hospitals</a></li>
+		  		<li id="policeItem"><a href="#resultsView" >Police Department</a></li>
+		  		<li id="fsItem"><a href="#resultsView" >Fire Stations</a></li>
+		  		<li id="tdItem"><a href="#resultsView" >Transportation Department</a></li>
+		  		<li id="settingItem"><a href="#settingsView">Settings</a></li>
+		  	</ul>
+		  	
+		 </div>
+		  
+		 <div data-role="footer" data-position="fixed" id="footer1">
+		 <div data-role="navbar">
+				<ul>
+					<li><a href="#homeView" data-role="button" data-icon="home">Home</a></li>
+					<li><a href="#findView" data-role="button" data-icon="search">Find</a></li>
+					<li><a href="#info" data-role="button" data-icon="info">Prepare</a></li>
+				</ul>
+		</div>
+		</div>
+	</div>
+	
+<div id="resultsView" data-role="page" data-theme="a">
+	<div  id="header1" data-position="fixed" data-role="header" data-theme="e">
+			<a href="#findView">Find</a>
+			<h1>Centers Near You</h1>
+	</div>
+		
+	<div data-role="content">
+			<ul id="searchResults" data-role="listview" data-inset="true" data-theme="d">
+			</ul>
+	</div>
+	
+	<div data-role="footer" data-position="fixed" id="footer1">
+    <div data-role="navbar">
+				<ul>
+					<li><a href="#homeView" data-role="button" data-icon="home">Home</a></li>
+					<li><a href="#findView" data-role="button" data-icon="search">Find</a></li>
+					<li><a href="#info" data-role="button" data-icon="info">Info</a></li>
+
+				</ul>
+		</div>
+	    </div>
+		
+	</div>
+	
+	<div id="mapView" data-role="page" data-theme ="a">
+		<div data-position="fixed" data-role="header" data-theme ="e">
+			<a href="#resultsView">Results</a>
+			<h1>Map View</h1>
+			<a href="#directionsView">Direction</a>
+		</div>
+		<div data-role="content" id="mapDiv" style="width: 100%; height: 100%;">
+	
+		</div>
+	</div>
+	
+	<div id ="directionsView" data-role="page">
+		<div data-role="header">
+		 	<a href="#mapView">Map</a>
+		 	<h1>Directions</h1>
+		</div>
+		
+		<div data-role="content" data-theme="d">
+		<div id="directions"></div>	   
+		</div>
+		
+		 <div data-role="footer" data-position="fixed" id="footer1">
+    <div data-role="navbar">
+				<ul>
+				<li><a href="#homeView" data-role="button" data-icon="home">Home</a></li>
+				<li><a href="#findView" data-role="button" data-icon="search">Find</a></li>
+				<li><a href="#info" data-role="button" data-icon="info">Info</a></li>
+
+				</ul>
+		</div>
+	    </div>
+	</div>
+	
+	<div id="settingsView" data-role="page" data-theme="a">
+		<div data-role="header" data-position="fixed" data-theme = "e">
+			<a href="#findView">Find</a>
+		    <h1>Settings</h1>
+		</div>
+		   
+		<div data-role="content">
+		  <ul data-role="listview" data-inset="true" data-theme="d">
+		 		 <li><a href="#distView">Search Distance<span id="distVal" class="ui-li-aside">2 Miles</span></a></li>
+		  </ul>
+		 </div>
+		 
+		 <div data-role="footer" data-position="fixed" id="footer1">
+    <div data-role="navbar">
+				<ul>
+				<li><a href="#homeView" data-role="button" data-icon="home">Home</a></li>
+				<li><a href="#findView" data-role="button" data-icon="search">Find</a></li>
+				<li><a href="#info" data-role="button" data-icon="info">Prepare</a></li>
+
+				</ul>
+		</div>
+	    </div>
+		   
+	</div>
+	
+	<div id="info" data-role="page" data-theme="a">
+		<div  id="header1" data-position="fixed" data-role="header"  data-theme="e">
+				<a href="#homeView" data-icon="home" data-iconpos="notext">>Home</a>
+				<h1>Assistance</h1>
+		</div>	
+		   
+		<div data-role="content">
+		  <ul data-role="listview" data-inset="true" data-theme="d">
+		 		<li>
+					<a href="http://www.ready.gov/natural-disasters" data-transition="fade"><img src="images/ready.png" width="100%" height="100%"/>Preparedness
+						</a>
+				</li>
+				<li>
+					<a href="https://www.disasterassistance.gov/famsVuWeb/integration" data-transition="fade"><img src="images/disasterassist.gif" width="100%" height="100%"/>Disaster Assistance
+						</a>
+				</li>
+				<li>
+					<a href="http://www.redcross.org/find-help/contact-family" data-transition="fade"><img src="images/redcross-logo.png" width="100%" height="100%"/>Contact lost ones
+					</a>
+				</li>
+		
+		  </ul>
+		 </div>
+		
+		 
+		 <div data-role="footer" data-position="fixed" id="footer1">
+    <div data-role="navbar">
+				<ul>
+				<li><a href="#homeView" data-role="button" data-icon="home">Home</a></li>
+				<li><a href="#findView" data-role="button" data-icon="search">Find</a></li>
+				<li><a href="#info" data-role="button" data-icon="info">Info</a></li>
+
+				</ul>
+		</div>
+	    </div>
+	</div>
+	<div id="distView" data-role="page" data-theme="a">
+		<div data-role="header" data-position="fixed"  data-theme="e">
+			<a href="#settingsView">Settings</a>
+		 	<h1>Search Distance</h1>
+		</div>
+		<div data-role="content">
+			<ul data-role="listview" data-inset="true" data-theme ="d">
+				<li onclick="updateDist(2)"><a href="#settingsView">2 miles</a>
+		 				
+		 		</li>
+		 		<li onclick="updateDist(5)"><a href="#settingsView">5 miles</a>
+		 				
+		 		</li>
+		 		<li onclick="updateDist(10)"><a href="#settingsView">10 miles</a>
+		 				
+		 		</li>
+		 	</ul>
+		 </div>
+		</div>
+	 
+  </body>
+</html>
